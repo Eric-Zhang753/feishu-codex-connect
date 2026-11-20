@@ -55,3 +55,7 @@ python bridge.py --config runtime/config.json
 - `examples/`：不含真实凭据的配置模板；`test_*.py`：迁移并补充的离线测试。
 
 更多设计和操作约束见 [机制说明](docs/ARCHITECTURE.md)。
+
+## 许可证
+
+本项目的代码和文档采用 [MIT License](LICENSE)。第三方依赖遵循各自的许可证。
