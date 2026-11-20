@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export CODEX_SHARED_ROOT="${CODEX_SHARED_ROOT:-$PROJECT_DIR/runtime}"
+if [ -n "${CODEX_BRIDGE_PYTHON:-}" ]; then
+    PYTHON="$CODEX_BRIDGE_PYTHON"
+elif [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/.venv/bin/python"
+else
+    PYTHON=python3
+fi
+exec "$PYTHON" "$PROJECT_DIR/shared_backend.py" "$@"

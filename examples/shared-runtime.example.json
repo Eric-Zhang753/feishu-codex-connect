@@ -1,0 +1,7 @@
+{
+  "codex_binary": "/absolute/path/to/the/real/codex",
+  "codex_home": "/absolute/path/to/your/.codex",
+  "socket": "/absolute/path/to/feishu-codex-connect/runtime/codex.sock",
+  "service": "feishu-codex-backend.service",
+  "manage_service": true
+}

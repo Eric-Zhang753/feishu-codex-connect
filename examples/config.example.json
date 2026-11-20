@@ -1,0 +1,8 @@
+{
+  "app_id": "REPLACE_WITH_FEISHU_APP_ID",
+  "app_secret": "REPLACE_WITH_FEISHU_APP_SECRET",
+  "project_dir": "/absolute/path/to/your/workspace",
+  "allowed_user_ids": [],
+  "message_feedback_enabled": false,
+  "global_questions_enabled": false
+}

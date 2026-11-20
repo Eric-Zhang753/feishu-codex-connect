@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "webhook_url": "https://open.feishu.cn/open-apis/bot/v2/hook/REPLACE-ME",
+  "signing_secret": "REPLACE_WITH_WEBHOOK_SIGNING_SECRET",
+  "message_format": "markdown"
+}
