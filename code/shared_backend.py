@@ -12,7 +12,7 @@ import sys
 import time
 from codex_locator import find_codex
 
-ROOT = Path(os.environ.get('CODEX_SHARED_ROOT', Path(__file__).resolve().parent / 'runtime')).expanduser().resolve()
+ROOT = Path(os.environ.get('CODEX_SHARED_ROOT', Path(__file__).resolve().parent.parent / 'runtime')).expanduser().resolve()
 # Long conversation snapshots can exceed 16 MiB. Use the same bounded budget
 # in both directions; never truncate the JSONL or its UTF-8 contents.
 MAX_MESSAGE_BYTES = 128 * 1024 * 1024

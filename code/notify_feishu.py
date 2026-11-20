@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Send Codex turn-completion notifications to a signed Feishu webhook.
 
-Usage: notify_feishu.py '<Codex JSON payload>'
-       notify_feishu.py --test
-       notify_feishu.py --message 'Experiment finished; see its output directory.'
-       notify_feishu.py --dry-run '<Codex JSON payload>'
+Usage: python code/notify_feishu.py '<Codex JSON payload>'
+       python code/notify_feishu.py --test
+       python code/notify_feishu.py --message 'Experiment finished; see its output directory.'
+       python code/notify_feishu.py --dry-run '<Codex JSON payload>'
 
 Credentials and the enabled switch live in sibling feishu-notify.json (mode 600).
 Messages use Feishu Card JSON 2.0 Markdown by default; message_format="text"
@@ -325,7 +325,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("payload", nargs="?", help="Codex notification JSON")
     parser.add_argument("--config", type=Path,
-                        default=Path(__file__).resolve().parent / "runtime" / "feishu-notify.json")
+                        default=Path(__file__).resolve().parent.parent / "runtime" / "feishu-notify.json")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--test", action="store_true", help="send one connectivity test")
     modes.add_argument("--message", help="send an explicit task notification")

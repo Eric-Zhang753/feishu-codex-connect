@@ -23,7 +23,7 @@ import httpx
 import psutil
 
 LOG = logging.getLogger('codex-server-monitor')
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 REFRESH_SECONDS = 30
 RENEW_AFTER = 13 * 86400  # Feishu stops accepting message edits after 14 days.
 AUTH_CODES = {99991661, 99991663, 99991668}

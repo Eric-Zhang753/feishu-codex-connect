@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 
 import argparse
@@ -1618,7 +1619,7 @@ async def check_codex(project, executable=None, codex_home=None):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=ROOT / 'runtime' / 'config.json')
+    parser.add_argument('--config', type=Path, default=PROJECT_ROOT / 'runtime' / 'config.json')
     parser.add_argument('--check-codex', action='store_true')
     args = parser.parse_args()
     config = load_config(args.config)

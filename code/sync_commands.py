@@ -16,6 +16,7 @@ import sys
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT.parent
 API = '/open-apis/application/v7/app_slash_commands'
 COMMANDS = (
     ('sessions', '查询会话列表；翻页用 /sessions 页码'),
@@ -171,7 +172,7 @@ async def main(apply, config_path):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=ROOT / 'runtime' / 'config.json')
+    parser.add_argument('--config', type=Path, default=PROJECT_ROOT / 'runtime' / 'config.json')
     parser.add_argument('--apply', action='store_true', help='Create/update the managed command panel entries.')
     args = parser.parse_args()
     try:
