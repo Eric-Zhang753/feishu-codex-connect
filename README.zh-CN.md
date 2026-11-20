@@ -1,5 +1,7 @@
 # Feishu ↔ Codex Connect
 
+<img src="assets/logo-240.png" alt="Feishu ↔ Codex Connect 项目标志" width="96" height="96">
+
 [English](README.md) | 简体中文
 
 把飞书应用机器人连接到一台 Linux 主机上的 Codex，让授权用户在飞书私聊中发起任务、查看结果、切换会话、回答问题和处理审批。本项目整理自一套实际运行的飞书桥接及 Codex 共享后端；部署代码、示例配置和面向 AI 的操作教程都在本目录内。

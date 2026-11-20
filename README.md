@@ -1,5 +1,7 @@
 # Feishu ↔ Codex Connect
 
+<img src="assets/logo-240.png" alt="Feishu ↔ Codex Connect logo" width="96" height="96">
+
 English | [简体中文](README.zh-CN.md)
 
 A bidirectional bridge between a Feishu bot and Codex on a Linux host. Authorized users can start tasks, inspect results, switch sessions, answer questions, and respond to approvals from a Feishu direct chat. This repository contains the bridge, an optional shared Codex backend, configuration templates, and a deployment guide.
