@@ -4,11 +4,17 @@
 
 [English](README.md) | 简体中文
 
-把飞书应用机器人连接到一台 Linux 主机上的 Codex，让授权用户在飞书私聊中发起任务、查看结果、切换会话、回答问题和处理审批。本项目整理自一套实际运行的飞书桥接及 Codex 共享后端；部署代码、示例配置和面向 AI 的操作教程都在本目录内。
+在手机或电脑的飞书里，直接使用运行在 Linux 主机上的 Codex。
 
-从 [给 AI 的部署教程](docs/AI_TUTORIAL.md) 开始：把这个项目目录交给目标主机上的 Codex，要求它阅读教程并协助部署。需要用户参与的飞书后台操作、凭据录入和端到端验证，教程也有对应步骤。
+## 功能亮点
 
-可以直接对目标主机上的 Codex 说：
+- **一次扫码接入飞书。** 用手机飞书扫码创建机器人，也可以给已有机器人一次补齐桥接权限。发布和审批按飞书所在组织的规则执行。
+- **在手机上控制 Codex 任务。** 私聊发一条消息就能提交任务，用 `/status` 看进度、`/steer` 补充要求、`/stop` 中止任务，也可以在聊天里切换模型或调整推理强度。
+- **在飞书继续 VS Code 的会话。** 配置共享后端后，用 `/sessions` 和 `/use` 找到在 VS Code 开始的会话，从手机或 IDE 继续同一段对话。
+- **在聊天里回答问题、处理审批。** 可以点问题卡片上的选项或用 `/answer` 回复，用 `/approve` 或 `/deny` 处理 Codex 的审批请求。也可将其他本机会话中的待答问题转到飞书私聊。
+- **在飞书查看结果和主机状态。** 任务结果通过 Markdown 卡片返回，可启用消息表情追踪任务状态。独立监控卡片可展示 CPU、内存和可用的 GPU 指标，也可配置 webhook 接收任务完成通知。
+
+把项目目录交给目标主机上的 Codex，让它按教程协助部署。 [给 AI 的部署教程](docs/AI_TUTORIAL.md)
 
 > 请阅读 `docs/AI_TUTORIAL.md`，帮我在这台机器上部署飞书与 Codex 的双向通信。先完成私聊功能，再根据我的需要配置 VS Code 共享会话。
 
@@ -19,35 +25,25 @@
 可选：VS Code ──code/codex-shared 代理──> 同一个本地共享 app-server
 ```
 
-## 功能与边界
+## 运行环境与访问权限
 
-- 文本任务顺序执行；SQLite 记录去重、会话绑定和队列。回复采用飞书 Markdown 卡片，过长内容分卡展示，正文超过 28,000 字符会截断。
-- `/sessions`、`/use`、`/current`、`/new` 切换会话；`/status`、`/stop`、`/steer` 控制任务；`/models`、`/model`、`/effort` 调整模型；`/help` 查看命令。
-- 支持 Codex 审批和问题：通过 `/approve`、`/deny`、`/answer` 或问题卡片回答。目标模式命令依赖所用 Codex 版本支持相应接口。
-- 可选共享后端让飞书加入同一 Codex 后端中的 VS Code 会话；可选扫描本机其他会话的问题；可选服务器状态卡片和独立 webhook 通知。各功能的启用条件见教程。
-- 目前针对 **Linux、飞书中国站企业自建应用和 Python 3.11**；只接收文本消息。长连接需要主机可访问飞书和 Codex 服务，无需公网入站地址。共享后端、IDE IPC、部分 Codex 接口依赖版本，升级后需要重新验证。
+项目面向 **Linux、飞书中国站企业自建应用和 Python 3.11**。主机主动连接飞书和 Codex 服务。桥接接收文本消息并顺序执行任务，用 SQLite 管理消息去重、会话绑定和任务队列。长回复会拆分成多张卡片，正文上限为 28,000 字符。共享会话、IDE 问题回传和部分命令依赖所用的 Codex 版本。
 
-**使用权限**：被授权的飞书账号可以让 Codex 操作主机工作区；会话切换还可能打开同一 `CODEX_HOME` 下的其他会话。先在可信私聊中使用，审阅审批内容，并保护好本机、机器人凭据和 `runtime/`。
+桥接通过飞书用户白名单或一次性配对码授权。被授权的账号可以让 Codex 操作主机工作区，也可能打开同一 `CODEX_HOME` 下的其他会话。请在可信私聊中使用，审阅审批内容，并保护好本机、机器人凭据和 `runtime/`。
 
 ## 本地启动概览
 
-在项目目录中，使用 Python 3.11 环境安装锁定依赖：
+在项目目录中，使用 Python 3.11 环境安装依赖并扫码创建机器人。
 
 ```bash
 python -m pip install -r requirements.lock
-mkdir -p runtime
-chmod 700 runtime
-cp examples/config.example.json runtime/config.json
-chmod 600 runtime/config.json
-```
-
-用本地编辑器填写 `runtime/config.json` 的应用凭据和绝对工作区路径，之后执行：
-
-```bash
+python code/setup_feishu.py --project-dir /absolute/path/to/workspace
 python code/bridge.py --config runtime/config.json
 ```
 
-首次启动、飞书订阅、私聊配对、后台服务和共享 VS Code 连接的先后顺序请遵循 [部署教程](docs/AI_TUTORIAL.md)。不要把运行中的 `runtime/`、数据库、日志、会话记录或凭据打包分享；`.gitignore` 已忽略本项目运行目录。
+用手机飞书扫码并确认，可一次申请私聊收发、卡片按钮回调、表情反馈和原生命令面板所需的权限。加上 `--group --server-monitor` 可同时申请群聊 @机器人和监控卡片置顶权限。已有机器人可用 `python code/setup_feishu.py --update-permissions --config /path/to/config.json` 扫码补权。
+
+发布审批、私聊验收、手动接入、后台服务和共享 VS Code 的操作见 [部署教程](docs/AI_TUTORIAL.md)。请妥善保管 `runtime/`、数据库、日志、会话记录和凭据。`.gitignore` 已忽略本项目运行目录。
 
 从旧版本升级时，请将现有 systemd 服务、IDE 启动器和通知命令中的脚本路径更新为 `code/` 下的新路径；运行数据仍放在项目根目录的 `runtime/` 中。
 
@@ -56,6 +52,7 @@ python code/bridge.py --config runtime/config.json
 ## 文件
 
 - `code/bridge.py`：飞书长连接、授权、任务队列和 Codex app-server 客户端。
+- `code/setup_feishu.py` 用于扫码创建机器人和给已有机器人补权。
 - `code/shared_backend.py`、`code/codex-shared`、`code/question_channel.py`：可选的本地共享后端及 IDE 问题回传。
 - `code/global_questions.py`、`code/ide_ipc.py`：可选的跨会话问题发现与 IDE IPC 回传。
 - `code/goal_commands.py`、`code/message_feedback.py`：目标命令和消息表情反馈。

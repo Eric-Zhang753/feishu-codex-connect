@@ -4,9 +4,19 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A bidirectional bridge between a Feishu bot and Codex on a Linux host. Authorized users can start tasks, inspect results, switch sessions, answer questions, and respond to approvals from a Feishu direct chat. This repository contains the bridge, an optional shared Codex backend, configuration templates, and a deployment guide.
+Use Codex on your Linux host from a Feishu chat on your phone or desktop.
 
-Start with the [deployment guide for AI assistants](docs/AI_TUTORIAL.md) (currently in Chinese). Give the project directory to Codex on the target host and ask it to follow the guide, including the Feishu configuration and end-to-end checks that require your participation.
+## Highlights
+
+- **Set up by QR code.** Scan with the Feishu app to create a bot or add the required permissions to an existing one. Follow Feishu’s prompts for publishing and any approvals required by your organization.
+- **Control tasks from your phone.** Send a task in a direct chat, check progress with `/status`, give Codex more direction with `/steer`, or stop a run with `/stop`. You can also switch models and adjust reasoning effort from the chat.
+- **Continue a VS Code session in Feishu.** With the optional shared backend, use `/sessions` and `/use` to select a session you started in VS Code and continue the conversation on either client.
+- **Answer questions and review approvals in chat.** Pick an option on a question card or reply with `/answer`. Use `/approve` and `/deny` to handle Codex approval requests. You can also relay questions from other local sessions to your direct chat.
+- **Track results and host health.** See results in Markdown cards and optionally follow task status through message reactions. A separate monitoring card can show CPU, memory, and available GPU metrics, and an optional webhook can deliver completion notifications.
+
+Give this project directory to Codex on the target host and ask it to follow the deployment guide. [Deployment guide for AI assistants (Chinese)](docs/AI_TUTORIAL.md)
+
+> Please read `docs/AI_TUTORIAL.md` and set up two-way Feishu–Codex messaging on this machine, starting with direct chat and adding VS Code session sharing if I need it.
 
 ```text
 Feishu direct chat ── bot long connection ──> code/bridge.py ── JSON-RPC ──> Codex app-server
@@ -15,35 +25,25 @@ Feishu direct chat ── bot long connection ──> code/bridge.py ── JSON
 Optional: VS Code ── code/codex-shared proxy ──> the same local shared app-server
 ```
 
-## Features and scope
+## Requirements and access
 
-- Text tasks run sequentially. SQLite stores deduplication records, session bindings, and the queue. Replies use Feishu Markdown cards, with long replies split across cards and message content truncated beyond 28,000 characters.
-- Use `/sessions`, `/use`, `/current`, and `/new` to manage sessions; `/status`, `/stop`, and `/steer` to control tasks; `/models`, `/model`, and `/effort` to select models; and `/help` for available commands.
-- Respond to Codex approvals and questions using `/approve`, `/deny`, `/answer`, or question cards. Some commands depend on support in the installed Codex version.
-- An optional shared backend lets Feishu join a VS Code session on the same Codex backend. Other optional features include discovering questions from local sessions, server-monitoring cards, and standalone webhook notifications. See the deployment guide for their prerequisites.
-- The project currently targets **Linux, Feishu China custom enterprise apps, and Python 3.11**, and accepts text messages only. The host needs outbound access to Feishu and Codex; no public inbound address is required. Shared-backend and IDE integrations depend on the Codex version and should be verified after upgrades.
+The bridge supports **Linux, Feishu China custom enterprise apps, and Python 3.11**. The host connects to Feishu and Codex over outbound connections. It accepts text input, runs tasks sequentially, and stores message deduplication records, session bindings, and the queue in SQLite. Long replies span multiple cards and are capped at 28,000 characters. Shared sessions, IDE question relays, and some commands depend on the installed Codex version.
 
-**Access:** Authorized Feishu users can ask Codex to work in the host workspace. Session switching may also open other sessions under the same `CODEX_HOME`. Use a trusted direct chat, review approvals, and protect the host, bot credentials, and `runtime/` directory.
+The bridge grants access through a Feishu user allowlist or a one-time pairing code. Authorized users can ask Codex to work in the host workspace and may open other sessions under the same `CODEX_HOME`. Use a trusted direct chat, review approvals, and protect the host, bot credentials, and `runtime/` directory.
 
 ## Quick start
 
-From the project root, install the locked dependencies using Python 3.11:
+From the project root, install the locked dependencies using Python 3.11 and set up a new bot by QR code.
 
 ```bash
 python -m pip install -r requirements.lock
-mkdir -p runtime
-chmod 700 runtime
-cp examples/config.example.json runtime/config.json
-chmod 600 runtime/config.json
-```
-
-Fill in the app credentials and an absolute workspace path in `runtime/config.json` using a local editor, then run:
-
-```bash
+python code/setup_feishu.py --project-dir /absolute/path/to/workspace
 python code/bridge.py --config runtime/config.json
 ```
 
-Follow the [deployment guide](docs/AI_TUTORIAL.md) for the correct order of Feishu setup, direct-chat pairing, background services, and optional VS Code sharing. Do not share the live `runtime/` directory, databases, logs, session records, or credentials; the project’s `.gitignore` excludes the runtime directory.
+Scan with the Feishu mobile app and confirm the permissions. The setup requests direct messages, card callbacks, reactions, and the native slash-command panel in one step. Add `--group --server-monitor` to include group mentions and monitoring-card pinning in the same scan. To add permissions to an existing bot, run `python code/setup_feishu.py --update-permissions --config /path/to/config.json`.
+
+Follow the [deployment guide](docs/AI_TUTORIAL.md) for Feishu release and approval, verifying direct chat and card buttons, manual setup, background services, and optional VS Code sharing. Keep the live `runtime/` directory, databases, logs, session records, and credentials private. The project’s `.gitignore` excludes the runtime directory.
 
 If upgrading an existing installation, update the script paths in systemd services, the IDE launcher, and notification commands to their new locations under `code/`. Runtime data remains in the project-root `runtime/` directory.
 
@@ -56,6 +56,7 @@ python -m unittest discover -s code -v
 ## Files
 
 - `code/bridge.py`: Feishu connection, authorization, task queue, and Codex app-server client.
+- `code/setup_feishu.py` creates a bot or adds permissions to an existing bot using Feishu QR authorization.
 - `code/shared_backend.py`, `code/codex-shared`, and `code/question_channel.py`: optional shared backend and IDE question relay.
 - `code/global_questions.py` and `code/ide_ipc.py`: optional cross-session question discovery and IDE IPC.
 - `code/goal_commands.py` and `code/message_feedback.py`: goal commands and message-reaction feedback.

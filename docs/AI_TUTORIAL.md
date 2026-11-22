@@ -15,7 +15,27 @@
 3. 找到**真实** Codex 可执行文件并记录绝对路径，用 `codex --version`、`codex app-server --help` 检查版本及参数，确认用户已在将运行服务的同一 Linux 用户、同一 `CODEX_HOME` 中完成 Codex 登录。不要把本项目的 `code/codex-shared` 指定为真实可执行文件，以免递归。
 4. 该实现使用 `app-server` 的 `initialize`、线程和回合等接口；共享模式还使用 `unix://` 监听，以及某些实验性接口。必要时参考 [OpenAI app-server 实现](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md) 和所安装版本的 `--help`。记录实际版本；版本改变后重新做验收。
 
-## 2. 创建飞书应用和最小配置
+## 2. 扫码申请飞书权限
+
+新部署在用户的私有终端执行以下命令，用手机中国版飞书扫码并确认。使用第二条命令启动桥接。
+
+```bash
+python code/setup_feishu.py --project-dir /absolute/path/to/workspace
+python code/bridge.py --config runtime/config.json
+```
+
+已有机器人使用现有的私有配置文件指定目标应用，通过同一次扫码增量申请权限。
+
+```bash
+python code/setup_feishu.py --update-permissions --config /path/to/config.json
+```
+
+- 扫码申请 `im:message.p2p_msg:readonly`、`im:message:send_as_bot`，并订阅消息事件 `im.message.receive_v1` 和卡片回调 `card.action.trigger`。表情反馈启用时申请 `im:message.reactions:write_only`。原生 `/` 命令面板同时申请 `application:app_slash_command:read` 和 `application:app_slash_command:write`，实际面板条目由 `code/sync_commands.py --apply` 同步。普通文本命令、审批、跨会话问题和 VS Code 共享复用桥接的消息权限。 [飞书扫码注册](https://pypi.org/project/lark-oapi/1.7.5/#one-click-app-registration) · [命令面板权限](https://open.larkenterprise.com/document/mcp_open_tools/agent-best-practices/agent-supports-slash-commands)
+- 要同时配置群聊 @机器人和监控卡片置顶，在扫码命令中加 `--group --server-monitor`。给已有应用补权时，配置中的 `bot_open_id` 和同一运行目录内已启用的 `server-monitor.json` 也会触发相应权限。监控卡片的发送与更新共用机器人发消息权限，置顶另需 `im:message.pins:write_only`。独立群 webhook 通知沿用单独的 webhook 配置。 [消息权限](https://open.feishu.cn/document/develop-robots/add-bot-to-external-group?lang=zh-CN) · [更新消息卡片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/patch)
+- 新部署会把凭据保存到权限为 600 的配置文件。飞书返回可用的扫码账号 ID 时自动加入白名单，否则按第 3 节配对。为已有应用补权时继续使用现有配置和绑定。
+- 飞书组织策略决定权限和版本是否免审。按扫码页提示完成发布或审批。桥接启动后用 `/help` 验证私聊，并点一次问题卡片按钮验证回调。若其中一项失败，到应用后台确认对应的事件或回调已使用**长连接**并发布。 [飞书自建应用审核规则](https://open.feishu.cn/document/best-practices/intro-to-custom-app-review?lang=zh-CN)
+
+### 手动接入
 
 1. 在[飞书开放平台](https://open.feishu.cn/app)创建**企业自建应用**，开启机器人能力。使用飞书中国站，不是 Lark 国际站或群自定义 webhook 机器人。长连接接收方式见[飞书官方说明](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-)。
 2. 对私聊最小功能，申请「获取用户发给机器人的单聊消息」`im:message.p2p_msg:readonly` 和「以应用身份发消息」`im:message:send_as_bot`；如平台当前页面显示等效权限或要求审批，以官方页面为准。参见[飞书机器人示例](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/quick-start)。选择用户在应用可用范围内。创建、发布应用版本，并完成组织要求的审批。

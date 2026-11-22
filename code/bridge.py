@@ -49,7 +49,7 @@ HELP = ('直接发送文字即可提交任务，任务会依次执行。\n'
         '- 多题可用 `/answer 请求编号 1;2` 按题目顺序选择\n- `/help` 查看帮助')
 
 
-def atomic_json(path, data):
+def atomic_json(path, data, *, overwrite=True):
     temporary = path.with_name('.' + path.name + '-' + secrets.token_hex(4))
     try:
         with temporary.open('x', encoding='utf-8') as f:
@@ -57,7 +57,10 @@ def atomic_json(path, data):
             json.dump(data, f, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(temporary, path)
+        if overwrite:
+            os.replace(temporary, path)
+        else:
+            os.link(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 

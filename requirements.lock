@@ -8,6 +8,7 @@ idna==3.20
 lark-oapi==1.7.5
 psutil==7.1.0
 pycryptodome==4.0.1
+qrcode==8.2
 requests-toolbelt==1.0.0
 requests==2.34.2
 typing_extensions==4.16.0
