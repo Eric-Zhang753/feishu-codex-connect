@@ -413,6 +413,23 @@ class StateMigrationTests(unittest.TestCase):
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_muting_stops_card_delivery_between_messages(self):
+        posted = []
+
+        def handler(request):
+            posted.append(json.loads(request.content))
+            return b.httpx.Response(200, json={'code': 0, 'data': {'message_id': 'sent'}})
+
+        client = b.Feishu(config(), chat_muted=lambda chat_id: bool(posted))
+        await client.client.aclose()
+        client.client = b.httpx.AsyncClient(base_url='https://open.feishu.cn', transport=b.httpx.MockTransport(handler))
+        self.addAsyncCleanup(client.client.aclose)
+        client.authenticate = AsyncMock(return_value='token')
+        cards = b.message_cards('一条消息', config()) * 2
+        self.assertEqual(await client.send_cards('chat', cards), ['sent'])
+        self.assertEqual(len(posted), 1)
+        self.assertEqual(await client.send_cards('chat', cards[:1], allow_muted=True), ['sent'])
+
     async def test_card_transport_retries_with_same_uuid_and_numbers_parts(self):
         requests = []
         def handler(request):

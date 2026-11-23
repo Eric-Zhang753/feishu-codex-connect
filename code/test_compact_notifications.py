@@ -75,6 +75,62 @@ class CompactBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bridge.reply.await_args.kwargs['notice'], '已完成')
         self.assertIn('实际完整结果', self.bridge.reply.await_args.args[1])
 
+    async def test_muted_chat_only_sends_questions_and_approvals(self):
+        self.bridge.reply = b.Bridge.reply.__get__(self.bridge)
+        self.bridge.feishu.send = AsyncMock(return_value=['sent'])
+        message = {'message_id': 'mute', 'chat_id': 'chat', 'user_id': 'owner',
+                   'chat_type': 'p2p', 'text': '/mute'}
+        await self.bridge.handle(message)
+        self.assertTrue(self.bridge.state.chat_muted('chat'))
+        self.assertFalse(self.bridge.state.chat_muted('other-chat'))
+        self.bridge.feishu.send.assert_not_awaited()
+        await self.start_turn()
+        self.bridge.observed['thread']['last_progress'] = 0
+        progress = {'method': 'item/completed', 'params': {'threadId': 'thread', 'turnId': 'turn',
+            'item': {'type': 'agentMessage', 'phase': 'commentary', 'text': '后台正在检查'}}}
+        await self.bridge.on_codex(progress)
+        self.bridge.feishu.send.assert_not_awaited()
+        self.assertEqual(self.bridge.observed['thread']['progress'], '后台正在检查')
+        await self.bridge.handle(dict(message, message_id='status', text='/status'))
+        self.bridge.feishu.send.assert_not_awaited()
+
+        await self.bridge.on_codex({'id': 1, 'method': 'item/commandExecution/requestApproval', 'params': {
+            'threadId': 'thread', 'turnId': 'turn', 'command': 'echo example'}})
+        self.assertEqual(self.bridge.feishu.send.await_args.kwargs, {'notice': '待审批', 'allow_muted': True})
+        self.bridge.feishu.send_cards = AsyncMock()
+        await self.bridge.on_codex({'id': 2, 'method': 'item/tool/requestUserInput', 'params': {
+            'threadId': 'thread', 'turnId': 'turn', 'questions': [{'id': 'q', 'question': '继续吗？'}]}})
+        self.bridge.feishu.send_cards.assert_awaited_once()
+        self.assertTrue(self.bridge.feishu.send_cards.await_args.kwargs['allow_muted'])
+        self.bridge.feishu.send_cards.side_effect = RuntimeError('card unavailable')
+        await self.bridge.on_codex({'id': 3, 'method': 'item/tool/requestUserInput', 'params': {
+            'threadId': 'thread', 'turnId': 'turn', 'questions': [{'id': 'q', 'question': '需要答复'}]}})
+        self.assertIn('需要答复', self.bridge.feishu.send.await_args.args[1])
+        self.assertTrue(self.bridge.feishu.send.await_args.kwargs['allow_muted'])
+        self.bridge.feishu.send.reset_mock()
+        await self.finish_turn()
+        self.bridge.feishu.send.assert_not_awaited()
+
+        await self.bridge.handle(dict(message, message_id='unmute', text='/unmute'))
+        self.assertFalse(self.bridge.state.chat_muted('chat'))
+        await self.start_turn()
+        self.bridge.observed['thread']['last_progress'] = 0
+        await self.bridge.on_codex(progress)
+        self.assertEqual(self.bridge.feishu.send.await_args.kwargs['notice'], '执行中')
+
+    async def test_muting_shared_wait_does_not_bypass_the_wait(self):
+        self.bridge.state.set_chat_muted('chat', True)
+        self.bridge.codex.request.side_effect = [
+            {'thread': {'status': {'type': 'active'}}}, {'thread': {'status': {'type': 'idle'}}}]
+
+        async def refreshed(*args):
+            self.bridge.runtime_changed.set()
+
+        self.bridge.refresh_runtime = AsyncMock(side_effect=refreshed)
+        await self.bridge.wait_shared_idle('thread', 'chat')
+        self.assertEqual(self.bridge.codex.request.await_count, 2)
+        self.bridge.reply.assert_not_awaited()
+
     async def test_native_active_goal_is_not_reported_complete_when_one_turn_finishes(self):
         self.bridge.goals.mark_managed('thread', 'chat')
         self.bridge.goals.cache['thread'] = {'status': 'active'}

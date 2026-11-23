@@ -43,6 +43,7 @@ HELP = ('直接发送文字即可提交任务，任务会依次执行。\n'
         '- `/models` 查看可选模型\n- `/model 名称或编号 [强度]` 修改模型\n'
         '- `/effort [强度]` 查看或修改思考强度\n'
         '- `/status` 查询状态\n- `/stop` 中止当前任务\n- `/new` 下次使用新会话\n'
+        '- `/mute` 静默此私聊，仅接收提问和审批\n- `/unmute` 恢复私聊回复\n'
         '- `/steer 补充要求` 调整正在执行的任务\n'
         '- `/goal 目标内容` 开启目标模式；`/goal` 查看目标\n'
         '- `/goal_edit 新目标` 修改目标\n'
@@ -326,6 +327,13 @@ class State:
         with self.lock, self.db:
             self.db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', (key, value))
 
+    def chat_muted(self, chat_id):
+        # Keep the original setting key so existing muted chats stay muted.
+        return self.setting('mute-progress:' + chat_id) == '1'
+
+    def set_chat_muted(self, chat_id, muted):
+        self.set_setting('mute-progress:' + chat_id, '1' if muted else '0')
+
     def receive(self, msg):
         with self.lock, self.db:
             cursor = self.db.execute('''INSERT OR IGNORE INTO messages
@@ -390,8 +398,9 @@ class FeishuResourcePermissionError(RuntimeError):
 
 
 class Feishu:
-    def __init__(self, config):
+    def __init__(self, config, *, chat_muted=None):
         self.config, self.token, self.expiry = config, None, 0
+        self.chat_muted = chat_muted
         self.lock = asyncio.Lock()
         self.client = httpx.AsyncClient(base_url='https://open.feishu.cn', timeout=15)
 
@@ -409,8 +418,8 @@ class Feishu:
             self.expiry = time.time() + int(data.get('expire', 7200)) - 120
             return self.token
 
-    async def send(self, chat_id, text, *, notice=None):
-        return await self.send_cards(chat_id, message_cards(text, self.config, notice=notice))
+    async def send(self, chat_id, text, *, notice=None, allow_muted=False):
+        return await self.send_cards(chat_id, message_cards(text, self.config, notice=notice), allow_muted=allow_muted)
 
     async def reaction_request(self, method, message_id, reaction_id=None, emoji=None):
         path = '/open-apis/im/v1/messages/' + quote(message_id, safe='') + '/reactions'
@@ -475,20 +484,22 @@ class Feishu:
             raise RuntimeError(f'Feishu {resource} upload code={code}')
         raise RuntimeError(f'Feishu {resource} upload authentication failed.')
 
-    async def send_cards(self, chat_id, cards):
+    async def send_cards(self, chat_id, cards, *, allow_muted=False):
         message_ids = []
         for card in cards:
-            message_id = await self.send_message(chat_id, 'interactive', card)
+            message_id = await self.send_message(chat_id, 'interactive', card, allow_muted=allow_muted)
             if message_id:
                 message_ids.append(message_id)
         return message_ids
 
-    async def send_message(self, chat_id, message_type, content):
+    async def send_message(self, chat_id, message_type, content, *, allow_muted=False):
         body = {'receive_id': chat_id, 'msg_type': message_type, 'uuid': str(uuid.uuid4()),
                 'content': json.dumps(content, ensure_ascii=False)}
         for attempt in range(3):
             try:
                 token = await self.authenticate()
+                if not allow_muted and self.chat_muted and self.chat_muted(chat_id):
+                    return None
                 response = await self.client.post('/open-apis/im/v1/messages',
                     params={'receive_id_type': 'chat_id'}, json=body,
                     headers={'Authorization': 'Bearer ' + token})
@@ -611,7 +622,7 @@ class Bridge:
         self.config, self.directory = config, directory
         self.state = State(directory / 'state.sqlite3')
         self.shared = bool(config.get('shared_socket'))
-        self.feishu, self.codex = Feishu(config), Codex(
+        self.feishu, self.codex = Feishu(config, chat_muted=self.state.chat_muted), Codex(
             self.on_codex, config.get('shared_socket'), runtime_dir=directory,
             codex_home=config.get('codex_home'), executable=config.get('codex_binary'))
         self.feedback = MessageFeedback(self.feishu, self.state,
@@ -640,15 +651,19 @@ class Bridge:
         if msg and self.state.receive(msg):
             self.loop.call_soon_threadsafe(self.incoming.put_nowait, msg)
 
-    async def reply(self, chat_id, text, *, notice=None):
+    async def reply(self, chat_id, text, *, notice=None, allow_muted=False):
+        if not allow_muted and self.state.chat_muted(chat_id):
+            return False
         try:
-            await self.feishu.send(chat_id, text, notice=notice)
+            await self.feishu.send(chat_id, text, notice=notice, allow_muted=allow_muted)
             return True
         except Exception as exc:
             LOG.error('reply_failed type=%s detail=%s', type(exc).__name__, clean(str(exc), self.config)[:200])
             return False
 
     async def reply_result(self, chat_id, text, active, *, notice):
+        if self.state.chat_muted(chat_id):
+            return
         display, paths = extract_markdown_attachments(text)
         generated = tuple(active.get('images', {}).values())
         if not paths and not generated:
@@ -670,6 +685,8 @@ class Bridge:
         failed = False
         sources = paths[:MAX_ATTACHMENTS] + generated
         for source in sources:
+            if self.state.chat_muted(chat_id):
+                return
             document_type = FILE_TYPES.get(source.suffix.lower()) if isinstance(source, Path) else None
             if isinstance(source, Path):
                 data = await asyncio.to_thread(read_local_attachment, source, workspace,
@@ -691,13 +708,18 @@ class Bridge:
                 failed = True
                 break
             seen.add(identity)
+            if self.state.chat_muted(chat_id):
+                return
             try:
                 if document_type:
                     key = await self.feishu.upload_file(source.name, data, *document_type)
-                    await self.feishu.send_message(chat_id, 'file', {'file_key': key})
+                    message_type = 'file'
                 else:
                     key = await self.feishu.upload_image(data, *media)
-                    await self.feishu.send_message(chat_id, 'image', {'image_key': key})
+                    message_type = 'image'
+                if self.state.chat_muted(chat_id):
+                    return
+                await self.feishu.send_message(chat_id, message_type, {message_type + '_key': key})
             except FeishuResourcePermissionError:
                 await self.reply(chat_id, '附件发送需要飞书机器人的「获取与上传图片或文件资源」（im:resource）权限。开通后可重新发起任务。')
                 return
@@ -715,7 +737,7 @@ class Bridge:
 
     async def show_question(self, code, pending):
         try:
-            await self.feishu.send_cards(pending['chat_id'], question_cards(code, pending, self.config))
+            await self.feishu.send_cards(pending['chat_id'], question_cards(code, pending, self.config), allow_muted=True)
             return True
         except Exception as exc:
             LOG.warning('question_card_failed type=%s', type(exc).__name__)
@@ -725,7 +747,7 @@ class Bridge:
                 for number, option in enumerate(q.get('options') or [], 1):
                     text.append(str(number) + '. ' + option['label'])
             text.append('回复：`/answer ' + code + ' 选项编号或答案`；多题用分号分隔。')
-            return await self.reply(pending['chat_id'], '\n\n'.join(text))
+            return await self.reply(pending['chat_id'], '\n\n'.join(text), allow_muted=True)
 
     async def register_question(self, event, chat, responder=None, source=None, code=None, display=True):
         params = event.get('params', {})
@@ -771,7 +793,7 @@ class Bridge:
 
     async def submit_question(self, code, pending):
         if not all(q['id'] in pending['answers'] for q in pending['params']['questions']):
-            await self.reply(pending['chat_id'], '选择已记录，请继续回答其余题目。')
+            await self.reply(pending['chat_id'], '选择已记录，请继续回答其余题目。', allow_muted=True)
             return
         result = {'answers': {q['id']: {'answers': [pending['answers'][q['id']]]}
                               for q in pending['params']['questions']}}
@@ -784,7 +806,7 @@ class Bridge:
         async with self.answer_lock:
             pending = self.approvals.get(code)
             if not pending or pending['chat_id'] != chat or pending['kind'] != 'question':
-                await self.reply(chat, '问题编号不存在、已结束，或不属于此聊天。')
+                await self.reply(chat, '问题编号不存在、已结束，或不属于此聊天。', allow_muted=True)
                 return
             questions = pending['params']['questions']
             try:
@@ -801,7 +823,8 @@ class Bridge:
                     values = {q['id']: v for q, v in zip(questions, parts)}
                 answers = {q['id']: question_answer(q, values[q['id']]) for q in questions}
             except (ValueError, TypeError, KeyError) as exc:
-                await self.reply(chat, '答案格式不正确：' + (str(exc) if isinstance(exc, ValueError) else '请回答全部题目。'))
+                await self.reply(chat, '答案格式不正确：' + (str(exc) if isinstance(exc, ValueError) else '请回答全部题目。'),
+                                 allow_muted=True)
                 return
             pending['answers'] = answers
             await self.submit_question(code, pending)
@@ -955,7 +978,7 @@ class Bridge:
             if (result['thread'].get('status') or {}).get('type') != 'active':
                 return
             await self.refresh_runtime(thread_id, result['thread'])
-            if not notified:
+            if not notified and not self.state.chat_muted(chat_id):
                 await self.reply(chat_id, '共享会话仍在执行上一项任务，本条任务会在它结束后开始。可用 /steer 补充当前任务要求。')
                 notified = True
             with suppress(asyncio.TimeoutError):
@@ -1340,6 +1363,16 @@ class Bridge:
             await self.change_effort(chat, tail)
         elif command in ('/goal', '/goal_edit', '/goal_pause', '/goal_resume', '/goal_clear'):
             await self.goals.handle(msg, command, tail)
+        elif command in ('/mute', '/unmute'):
+            if msg['chat_type'] != 'p2p':
+                await self.reply(chat, '请在机器人私聊中设置静默。')
+            elif tail.strip():
+                await self.reply(chat, '用 `/mute` 开启私聊静默，或用 `/unmute` 恢复私聊回复。')
+            else:
+                muted = command == '/mute'
+                self.state.set_chat_muted(chat, muted)
+                if not muted:
+                    await self.reply(chat, '已恢复私聊回复。')
         elif command == '/status':
             active = self.runtime_for(chat)
             description = (f"执行中，已运行 {int((time.time() - active['started']) / 60)} 分钟\n"
@@ -1380,7 +1413,7 @@ class Bridge:
                 return
             pending = self.approvals.get(code)
             if not pending or pending['chat_id'] != chat:
-                await self.reply(chat, '请求编号不存在、已结束，或不属于此聊天。')
+                await self.reply(chat, '请求编号不存在、已结束，或不属于此聊天。', allow_muted=True)
                 return
             if command in ('/approve', '/deny') and pending['kind'] != 'question':
                 accepted = command == '/approve'
@@ -1388,7 +1421,8 @@ class Bridge:
                           if pending['kind'] == 'permissions' else
                           {'decision': 'accept' if accepted else 'decline'})
             else:
-                await self.reply(chat, '此请求需要使用 ' + ('/answer' if pending['kind'] == 'question' else '/approve 或 /deny'))
+                await self.reply(chat, '此请求需要使用 ' + ('/answer' if pending['kind'] == 'question' else '/approve 或 /deny'),
+                                 allow_muted=True)
                 return
             await self.codex.respond(pending['rpc_id'], result)
             self.approvals.pop(code, None)
@@ -1564,7 +1598,7 @@ class Bridge:
             await self.reply(active['chat_id'], 'Codex 请求审批：\n原因：' + str(params.get('reason') or '请检查操作')
                 + '\n目录：' + str(params.get('cwd') or self.config['project_dir'])
                 + '\n\n操作：\n' + markdown_code(str(details)[:7000])
-                + '\n\n同意：`/approve ' + code + '`\n\n拒绝：`/deny ' + code + '`', notice='待审批')
+                + '\n\n同意：`/approve ' + code + '`\n\n拒绝：`/deny ' + code + '`', notice='待审批', allow_muted=True)
             return
         if method == 'turn/started':
             active['turn_id'] = params['turn']['id']
@@ -1612,7 +1646,8 @@ class Bridge:
                     active['final'] = text
                 else:
                     active['progress'] = text[:1200]
-                    if time.time() - active['last_progress'] > 90:
+                    if (time.time() - active['last_progress'] > 90 and
+                            not self.state.chat_muted(active['chat_id'])):
                         active['last_progress'] = time.time()
                         await self.reply(active['chat_id'], '执行进度：\n' + text[:1200], notice='执行中')
         elif method == 'item/started':

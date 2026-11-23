@@ -22,19 +22,25 @@ class MessageFeedback:
 
     def row(self, message_id):
         with self.state.lock:
-            row = self.state.db.execute('SELECT * FROM message_feedback WHERE message_id=?',
-                                        (message_id,)).fetchone()
+            row = self.state.db.execute('''SELECT f.*, m.chat_id FROM message_feedback f
+                LEFT JOIN messages m ON m.message_id=f.message_id WHERE f.message_id=?''', (message_id,)).fetchone()
             return dict(row) if row else None
 
     def pending(self):
         with self.state.lock:
-            return [row[0] for row in self.state.db.execute(
-                "SELECT message_id FROM message_feedback WHERE applied IS NULL OR desired<>applied OR stale_ids<>'[]'")]
+            return [message_id for message_id, chat_id in self.state.db.execute('''
+                SELECT f.message_id, m.chat_id FROM message_feedback f
+                LEFT JOIN messages m ON m.message_id=f.message_id
+                WHERE f.applied IS NULL OR f.desired<>f.applied OR f.stale_ids<>'[]' ''').fetchall()
+                if not chat_id or not self.state.chat_muted(chat_id)]
 
     async def set(self, message_id, status):
         if not self.enabled or status not in EMOJI:
             return
         with self.state.lock, self.state.db:
+            chat = self.state.db.execute('SELECT chat_id FROM messages WHERE message_id=?', (message_id,)).fetchone()
+            if chat and self.state.chat_muted(chat[0]):
+                return
             self.state.db.execute('''INSERT INTO message_feedback(message_id,desired,updated) VALUES (?,?,?)
                 ON CONFLICT(message_id) DO UPDATE SET desired=excluded.desired,updated=excluded.updated''',
                 (message_id, EMOJI[status], time.time()))
@@ -54,7 +60,7 @@ class MessageFeedback:
         try:
             for _ in range(4):
                 row = self.row(message_id)
-                if not row:
+                if not row or (row['chat_id'] and self.state.chat_muted(row['chat_id'])):
                     return
                 if row['desired'] != row['applied']:
                     # Adding a given emoji by the same app is idempotent. This

@@ -10,6 +10,7 @@ Use Codex on your Linux host from a Feishu chat on your phone or desktop.
 
 - **Set up by QR code.** Scan with the Feishu app to create a bot or add the required permissions to an existing one. Follow Feishu’s prompts for publishing and any approvals required by your organization.
 - **Control tasks from your phone.** Send a task in a direct chat, check progress with `/status`, give Codex more direction with `/steer`, or stop a run with `/stop`. You can also switch models and adjust reasoning effort from the chat.
+- **Mute the bridge in direct chat.** Use `/mute` to receive only Codex questions and approval requests in that chat. Separate completion notifications continue through their configured channel. Use `/unmute` to resume replies.
 - **Continue a VS Code session in Feishu.** With the optional shared backend, use `/sessions` and `/use` to select a session you started in VS Code and continue the conversation on either client.
 - **Answer questions and review approvals in chat.** Pick an option on a question card or reply with `/answer`. Use `/approve` and `/deny` to handle Codex approval requests. You can also relay questions from other local sessions to your direct chat.
 - **Track results and host health.** Read Markdown cards, view generated images, and download files such as PDFs from direct chat. Follow task status through optional message reactions, check host metrics in a monitoring card, or receive completion notifications through a webhook.

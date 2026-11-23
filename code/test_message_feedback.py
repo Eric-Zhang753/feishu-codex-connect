@@ -38,6 +38,18 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.feishu.delete_reaction.assert_awaited_once_with('original-user-message','reaction-Typing')
         self.assertFalse(self.feedback.pending())
 
+    async def test_muted_chat_suppresses_typing_and_completion_reactions(self):
+        self.state.receive({'message_id': 'message', 'chat_id': 'chat', 'user_id': 'owner',
+                            'chat_type': 'p2p', 'text': 'task', 'created': time.time()})
+        self.state.set_chat_muted('chat', True)
+        await self.feedback.set('message', 'busy')
+        await self.drain()
+        self.feishu.add_reaction.assert_not_awaited()
+        await self.feedback.set('message', 'completed')
+        await self.drain()
+        self.feishu.add_reaction.assert_not_awaited()
+        self.assertFalse(self.feedback.pending())
+
     async def test_duplicate_running_updates_do_not_add_duplicate_reactions(self):
         for status in ['busy','running','busy']:
             await self.feedback.set('message',status)

@@ -90,6 +90,7 @@ WantedBy=default.target
 
 ## 6. 附件与可选能力
 
+- **私聊静默。** 发 `/mute` 后，桥接私聊只接收提问和审批相关消息。任务继续执行，已配置的独立完成通知照常发往其目标会话。发 `/unmute` 恢复私聊回复。静默设置保存在本机 SQLite 中，切换 Codex 会话或重启桥接后仍然有效。
 - **私聊附件输出。** Codex 生成的图片和最终回复中明确链接的 JPG、PNG、GIF、WebP 会发成飞书图片消息。明确链接的 PDF、Word、Excel、PowerPoint 和 CSV 会以可下载的文件消息发送。附件需在桥接主机的当前会话工作区或 `/mnt/data` 中，Codex 生成的图片也可来自该会话的生图目录。每轮最多发送六个附件，单张图片上限为 10 MB，单份文件上限为 30 MB。图片和文件共用「获取与上传图片或文件资源」（`im:resource`）权限。 [飞书上传图片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/image/create) · [飞书上传文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/file/create)
 - **全局问题**：`global_questions_enabled: true` 会扫描 `codex_home/sessions`，将同一 Codex 数据目录中其他活动会话的非敏感问题发到最近的已授权私聊，并通过 IDE 私有 IPC 回答。它涉及其他会话内容，且依赖未公开的 IDE IPC 格式；只在用户明确需要并实际验证后开启。普通桥接会话内的问题无需开启。
 - **群聊**：申请飞书 `im:message.group_at_msg:readonly` 等当前平台要求的权限；可通过[获取机器人信息](https://open.feishu.cn/document/client-docs/bot-v3/bot-overview)查到该应用机器人的 `open_id` 并填入配置的 `bot_open_id`，让授权用户在群内 @机器人。回复对群成员可见，先获得用户对使用该群的明确意愿。

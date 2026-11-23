@@ -83,6 +83,15 @@ class ResultImageTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.feishu.send_message.assert_awaited_once_with('chat', 'file', {'file_key': 'file-key'})
         self.bridge.feishu.upload_image.assert_not_awaited()
 
+    async def test_muted_chat_suppresses_results_and_attachment_uploads(self):
+        self.bridge.state.set_chat_muted('chat', True)
+        (self.workspace / 'report.pdf').write_bytes(PDF)
+        await self.bridge.reply_result('chat', '[报告](report.pdf)',
+            {'chat_type': 'p2p', 'thread_id': 'thread'}, notice='已完成')
+        self.bridge.reply.assert_not_awaited()
+        self.bridge.feishu.upload_file.assert_not_awaited()
+        self.bridge.feishu.send_message.assert_not_awaited()
+
     def test_markdown_keeps_examples_and_remote_urls_clickable(self):
         text = '`![示例](a.png)`\n~~~\n![例子](b.png)\n~~~\n![网络图](https://example.org/image.png)\n'
         display, paths = extract_markdown_attachments(text)
