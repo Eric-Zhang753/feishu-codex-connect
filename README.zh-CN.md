@@ -12,7 +12,7 @@
 - **在手机上控制 Codex 任务。** 私聊发一条消息就能提交任务，用 `/status` 看进度、`/steer` 补充要求、`/stop` 中止任务，也可以在聊天里切换模型或调整推理强度。
 - **在飞书继续 VS Code 的会话。** 配置共享后端后，用 `/sessions` 和 `/use` 找到在 VS Code 开始的会话，从手机或 IDE 继续同一段对话。
 - **在聊天里回答问题、处理审批。** 可以点问题卡片上的选项或用 `/answer` 回复，用 `/approve` 或 `/deny` 处理 Codex 的审批请求。也可将其他本机会话中的待答问题转到飞书私聊。
-- **在飞书查看结果和主机状态。** 任务结果通过 Markdown 卡片返回，可启用消息表情追踪任务状态。独立监控卡片可展示 CPU、内存和可用的 GPU 指标，也可配置 webhook 接收任务完成通知。
+- **在飞书查看结果和主机状态。** 在私聊里阅读 Markdown 卡片、查看生成的图片、下载 PDF 等文件。可启用消息表情追踪任务状态，也可用监控卡片查看主机指标，或配置 webhook 接收完成通知。
 
 把项目目录交给目标主机上的 Codex，让它按教程协助部署。 [给 AI 的部署教程](docs/AI_TUTORIAL.md)
 
@@ -41,7 +41,7 @@ python code/setup_feishu.py --project-dir /absolute/path/to/workspace
 python code/bridge.py --config runtime/config.json
 ```
 
-用手机飞书扫码并确认，可一次申请私聊收发、卡片按钮回调、表情反馈和原生命令面板所需的权限。加上 `--group --server-monitor` 可同时申请群聊 @机器人和监控卡片置顶权限。已有机器人可用 `python code/setup_feishu.py --update-permissions --config /path/to/config.json` 扫码补权。
+用手机飞书扫一次码，即可同时申请私聊收发、群聊 @机器人、图片和文件上传、卡片按钮回调、表情反馈、原生命令面板和监控卡片置顶权限。按飞书页面提示发布或提交审批。已有机器人可用 `python code/setup_feishu.py --update-permissions --config /path/to/config.json` 扫码补齐同一套权限。
 
 发布审批、私聊验收、手动接入、后台服务和共享 VS Code 的操作见 [部署教程](docs/AI_TUTORIAL.md)。请妥善保管 `runtime/`、数据库、日志、会话记录和凭据。`.gitignore` 已忽略本项目运行目录。
 
@@ -53,6 +53,7 @@ python code/bridge.py --config runtime/config.json
 
 - `code/bridge.py`：飞书长连接、授权、任务队列和 Codex app-server 客户端。
 - `code/setup_feishu.py` 用于扫码创建机器人和给已有机器人补权。
+- `code/result_attachments.py` 读取 Codex 生成的图片和回复中链接的本地文件，用于飞书私聊发送。
 - `code/shared_backend.py`、`code/codex-shared`、`code/question_channel.py`：可选的本地共享后端及 IDE 问题回传。
 - `code/global_questions.py`、`code/ide_ipc.py`：可选的跨会话问题发现与 IDE IPC 回传。
 - `code/goal_commands.py`、`code/message_feedback.py`：目标命令和消息表情反馈。

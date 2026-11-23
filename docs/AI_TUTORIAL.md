@@ -30,15 +30,15 @@ python code/bridge.py --config runtime/config.json
 python code/setup_feishu.py --update-permissions --config /path/to/config.json
 ```
 
-- 扫码申请 `im:message.p2p_msg:readonly`、`im:message:send_as_bot`，并订阅消息事件 `im.message.receive_v1` 和卡片回调 `card.action.trigger`。表情反馈启用时申请 `im:message.reactions:write_only`。原生 `/` 命令面板同时申请 `application:app_slash_command:read` 和 `application:app_slash_command:write`，实际面板条目由 `code/sync_commands.py --apply` 同步。普通文本命令、审批、跨会话问题和 VS Code 共享复用桥接的消息权限。 [飞书扫码注册](https://pypi.org/project/lark-oapi/1.7.5/#one-click-app-registration) · [命令面板权限](https://open.larkenterprise.com/document/mcp_open_tools/agent-best-practices/agent-supports-slash-commands)
-- 要同时配置群聊 @机器人和监控卡片置顶，在扫码命令中加 `--group --server-monitor`。给已有应用补权时，配置中的 `bot_open_id` 和同一运行目录内已启用的 `server-monitor.json` 也会触发相应权限。监控卡片的发送与更新共用机器人发消息权限，置顶另需 `im:message.pins:write_only`。独立群 webhook 通知沿用单独的 webhook 配置。 [消息权限](https://open.feishu.cn/document/develop-robots/add-bot-to-external-group?lang=zh-CN) · [更新消息卡片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/patch)
+- 新建和补权默认使用同一套扫码申请。一次申请私聊收发、群聊 @机器人、图片和文件上传（`im:resource`）、表情反馈、命令面板读写和监控卡片置顶，共八项应用身份权限，同时订阅 `im.message.receive_v1` 和 `card.action.trigger`。普通文本命令、审批、跨会话问题和 VS Code 共享复用桥接的消息权限。 [飞书扫码注册](https://pypi.org/project/lark-oapi/1.7.5/#one-click-app-registration) · [消息权限](https://open.feishu.cn/document/develop-robots/add-bot-to-external-group?lang=zh-CN) · [命令面板权限](https://open.larkenterprise.com/document/mcp_open_tools/agent-best-practices/agent-supports-slash-commands)
+- 群聊和监控仍按使用场景配置。新建时加 `--group` 可预填群聊所需的 `bot_open_id`。命令面板条目由 `code/sync_commands.py --apply` 同步，监控服务和独立群 webhook 通知按第 6 节配置。需要根据已启用的功能控制申请范围时，可使用 `--configured-permissions`，并用 `--group` 或 `--server-monitor` 明确纳入相应权限。
 - 新部署会把凭据保存到权限为 600 的配置文件。飞书返回可用的扫码账号 ID 时自动加入白名单，否则按第 3 节配对。为已有应用补权时继续使用现有配置和绑定。
 - 飞书组织策略决定权限和版本是否免审。按扫码页提示完成发布或审批。桥接启动后用 `/help` 验证私聊，并点一次问题卡片按钮验证回调。若其中一项失败，到应用后台确认对应的事件或回调已使用**长连接**并发布。 [飞书自建应用审核规则](https://open.feishu.cn/document/best-practices/intro-to-custom-app-review?lang=zh-CN)
 
 ### 手动接入
 
 1. 在[飞书开放平台](https://open.feishu.cn/app)创建**企业自建应用**，开启机器人能力。使用飞书中国站，不是 Lark 国际站或群自定义 webhook 机器人。长连接接收方式见[飞书官方说明](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-)。
-2. 对私聊最小功能，申请「获取用户发给机器人的单聊消息」`im:message.p2p_msg:readonly` 和「以应用身份发消息」`im:message:send_as_bot`；如平台当前页面显示等效权限或要求审批，以官方页面为准。参见[飞书机器人示例](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/quick-start)。选择用户在应用可用范围内。创建、发布应用版本，并完成组织要求的审批。
+2. 私聊收发需要 `im:message.p2p_msg:readonly` 和 `im:message:send_as_bot`。发送图片和文件还需申请「获取与上传图片或文件资源」（`im:resource`）。将使用者加入应用可用范围，发布应用版本，并按飞书组织规则完成审批。 [飞书机器人示例](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/quick-start)
 3. 在项目目录创建私有运行目录：`mkdir -p runtime && chmod 700 runtime`。复制 `examples/config.example.json` 到 `runtime/config.json` 并 `chmod 600 runtime/config.json`。让用户在本机安全编辑器填写 `app_id`、`app_secret`、已有的绝对 `project_dir`；`allowed_user_ids` 保持空数组以启用首次私聊配对。
 4. 默认示例关闭消息表情反馈和跨会话问题扫描。可选添加 `codex_binary` 指向真实可执行文件、`codex_home` 指向正确的 Codex 数据目录；不设置时分别从 `CODEX_BINARY`/PATH 或默认 `~/.codex` 查找。`developer_instructions` 可选，用于新建会话，不必硬编码用户本机的虚拟环境。
 5. 在私有终端前台启动 `python code/bridge.py --config runtime/config.json`。程序会先验证飞书凭据、连接 Codex，再建立飞书 SDK 长连接，并写入 `runtime/status.json` 和 `runtime/service.log`。只报告状态及错误类型，不展示文件中的敏感内容。
@@ -47,7 +47,7 @@ python code/setup_feishu.py --update-permissions --config /path/to/config.json
 ## 3. 首次配对和真实验收
 
 1. 未配置 `allowed_user_ids` 时，首次启动生成权限为 600 的 `runtime/pairing.json`，绑定码有效 24 小时。让用户在自己的私有终端查看该文件，并在飞书**与机器人私聊**中发送 `/bind <绑定码>`。不要让用户把绑定码交给 AI；绑定成功后文件会删除，绑定信息存在 `runtime/state.sqlite3`。绑定码过期时重启桥接生成新码。
-2. 配对后，用户依次发送 `/help`、`/status` 和一个无副作用的简单任务；核实收到回复及实际模型结果。第一次新任务会建立 Codex 会话。
+2. 配对后，发送 `/help`、`/status` 和一个无副作用的简单任务，并核实收到回复和模型结果。第一次新任务会建立 Codex 会话。让 Codex 分别回复一张图片和一份 PDF，确认手机飞书能打开图片并下载文件。
 3. 核实非授权用户不能提交任务；若已配置卡片回调，实际触发一次非敏感问题并测试按钮或 `/answer`。如需验证审批，用一个明确需要审批的低风险操作，确认用户回复后才执行。不同 Codex 版本可能新增审批类型或客户端能力要求；不支持的审批不能假定可以从飞书处理。
 4. 离线测试可用 `python -m unittest discover -s code -v`；它不能替代真实飞书、Codex 登录、事件订阅和按钮回调的验收。`python code/bridge.py --config runtime/config.json --check-codex` 会向模型发送一次真实连通性请求，独立于共享后端，可能产生模型用量。
 
@@ -88,8 +88,9 @@ WantedBy=default.target
 
 共享代理会把 IDE 的普通 `app-server` stdio 流量转为私有 Unix socket 上的 WebSocket；它不是把 `/use` 自动绑定到当前 IDE 标签页。若任务由 IDE 启动，原客户端专属的工具仍可能只能由 IDE 处理。
 
-## 6. 可选能力
+## 6. 附件与可选能力
 
+- **私聊附件输出。** Codex 生成的图片和最终回复中明确链接的 JPG、PNG、GIF、WebP 会发成飞书图片消息。明确链接的 PDF、Word、Excel、PowerPoint 和 CSV 会以可下载的文件消息发送。附件需在桥接主机的当前会话工作区或 `/mnt/data` 中，Codex 生成的图片也可来自该会话的生图目录。每轮最多发送六个附件，单张图片上限为 10 MB，单份文件上限为 30 MB。图片和文件共用「获取与上传图片或文件资源」（`im:resource`）权限。 [飞书上传图片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/image/create) · [飞书上传文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/file/create)
 - **全局问题**：`global_questions_enabled: true` 会扫描 `codex_home/sessions`，将同一 Codex 数据目录中其他活动会话的非敏感问题发到最近的已授权私聊，并通过 IDE 私有 IPC 回答。它涉及其他会话内容，且依赖未公开的 IDE IPC 格式；只在用户明确需要并实际验证后开启。普通桥接会话内的问题无需开启。
 - **群聊**：申请飞书 `im:message.group_at_msg:readonly` 等当前平台要求的权限；可通过[获取机器人信息](https://open.feishu.cn/document/client-docs/bot-v3/bot-overview)查到该应用机器人的 `open_id` 并填入配置的 `bot_open_id`，让授权用户在群内 @机器人。回复对群成员可见，先获得用户对使用该群的明确意愿。
 - **表情反馈**：开启 `message_feedback_enabled`，并按飞书[消息表情回复接口](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1)申请对应权限；无此权限时保持关闭即可。

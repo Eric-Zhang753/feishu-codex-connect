@@ -12,7 +12,7 @@ Use Codex on your Linux host from a Feishu chat on your phone or desktop.
 - **Control tasks from your phone.** Send a task in a direct chat, check progress with `/status`, give Codex more direction with `/steer`, or stop a run with `/stop`. You can also switch models and adjust reasoning effort from the chat.
 - **Continue a VS Code session in Feishu.** With the optional shared backend, use `/sessions` and `/use` to select a session you started in VS Code and continue the conversation on either client.
 - **Answer questions and review approvals in chat.** Pick an option on a question card or reply with `/answer`. Use `/approve` and `/deny` to handle Codex approval requests. You can also relay questions from other local sessions to your direct chat.
-- **Track results and host health.** See results in Markdown cards and optionally follow task status through message reactions. A separate monitoring card can show CPU, memory, and available GPU metrics, and an optional webhook can deliver completion notifications.
+- **Track results and host health.** Read Markdown cards, view generated images, and download files such as PDFs from direct chat. Follow task status through optional message reactions, check host metrics in a monitoring card, or receive completion notifications through a webhook.
 
 Give this project directory to Codex on the target host and ask it to follow the deployment guide. [Deployment guide for AI assistants (Chinese)](docs/AI_TUTORIAL.md)
 
@@ -41,7 +41,7 @@ python code/setup_feishu.py --project-dir /absolute/path/to/workspace
 python code/bridge.py --config runtime/config.json
 ```
 
-Scan with the Feishu mobile app and confirm the permissions. The setup requests direct messages, card callbacks, reactions, and the native slash-command panel in one step. Add `--group --server-monitor` to include group mentions and monitoring-card pinning in the same scan. To add permissions to an existing bot, run `python code/setup_feishu.py --update-permissions --config /path/to/config.json`.
+Scan once with the Feishu mobile app to request direct messages, group mentions, image and file uploads, card callbacks, reactions, slash commands, and monitoring-card pinning. Follow Feishu’s prompts to publish the app or submit it for approval. To add the same permissions to an existing bot, run `python code/setup_feishu.py --update-permissions --config /path/to/config.json`.
 
 Follow the [deployment guide](docs/AI_TUTORIAL.md) for Feishu release and approval, verifying direct chat and card buttons, manual setup, background services, and optional VS Code sharing. Keep the live `runtime/` directory, databases, logs, session records, and credentials private. The project’s `.gitignore` excludes the runtime directory.
 
@@ -57,6 +57,7 @@ python -m unittest discover -s code -v
 
 - `code/bridge.py`: Feishu connection, authorization, task queue, and Codex app-server client.
 - `code/setup_feishu.py` creates a bot or adds permissions to an existing bot using Feishu QR authorization.
+- `code/result_attachments.py` reads generated images and linked local files for delivery in direct chat.
 - `code/shared_backend.py`, `code/codex-shared`, and `code/question_channel.py`: optional shared backend and IDE question relay.
 - `code/global_questions.py` and `code/ide_ipc.py`: optional cross-session question discovery and IDE IPC.
 - `code/goal_commands.py` and `code/message_feedback.py`: goal commands and message-reaction feedback.

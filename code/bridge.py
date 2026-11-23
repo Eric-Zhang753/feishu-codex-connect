@@ -33,6 +33,9 @@ from question_channel import QuestionServer
 from global_questions import GlobalQuestions
 from message_feedback import MessageFeedback
 from goal_commands import GoalCommands
+from result_attachments import (FILE_TYPES, MAX_ATTACHMENTS, MAX_FILE_BYTES, MAX_IMAGE_BYTES,
+                                extract_markdown_attachments, generated_image_bytes, image_format,
+                                read_local_attachment, remember_generated_image)
 
 LOG = logging.getLogger('codex-feishu')
 HELP = ('直接发送文字即可提交任务，任务会依次执行。\n'
@@ -340,6 +343,11 @@ class State:
             return [dict(row) for row in self.db.execute(
                 'SELECT * FROM messages WHERE status=? ORDER BY created', (status,)).fetchall()]
 
+    def is_direct_chat(self, chat_id):
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM messages WHERE chat_id=? AND chat_type='p2p' LIMIT 1",
+                                   (chat_id,)).fetchone() is not None
+
     def thread(self, chat_id, thread_id=None):
         with self.lock, self.db:
             if thread_id is not None:
@@ -375,6 +383,10 @@ class State:
     def new_thread(self, chat_id):
         with self.lock, self.db:
             self.db.execute("UPDATE chats SET thread_id='' WHERE chat_id=?", (chat_id,))
+
+
+class FeishuResourcePermissionError(RuntimeError):
+    pass
 
 
 class Feishu:
@@ -437,36 +449,64 @@ class Feishu:
     async def delete_reaction(self, message_id, reaction_id):
         await self.reaction_request('DELETE', message_id, reaction_id=reaction_id)
 
+    async def upload_image(self, data, extension, mime_type):
+        return await self.upload_resource('image', {'image_type': 'message'}, ('codex.' + extension, data, mime_type))
+
+    async def upload_file(self, filename, data, file_type, mime_type):
+        return await self.upload_resource('file', {'file_type': file_type, 'file_name': filename},
+                                          (filename, data, mime_type))
+
+    async def upload_resource(self, resource, fields, attachment):
+        for _ in range(2):
+            token = await self.authenticate()
+            response = await self.client.post('/open-apis/im/v1/' + resource + 's', data=fields,
+                files={resource: attachment},
+                headers={'Authorization': 'Bearer ' + token})
+            result = response.json()
+            code = result.get('code')
+            if code == 99991672:
+                raise FeishuResourcePermissionError('Feishu resource upload scope is missing.')
+            if code in (99991661, 99991663, 99991668):
+                self.expiry = 0
+                continue
+            key = (result.get('data') or {}).get(resource + '_key')
+            if response.is_success and code == 0 and key:
+                return key
+            raise RuntimeError(f'Feishu {resource} upload code={code}')
+        raise RuntimeError(f'Feishu {resource} upload authentication failed.')
+
     async def send_cards(self, chat_id, cards):
         message_ids = []
         for card in cards:
-            body = {'receive_id': chat_id, 'msg_type': 'interactive', 'uuid': str(uuid.uuid4()),
-                    'content': json.dumps(card, ensure_ascii=False)}
-            for attempt in range(3):
-                try:
-                    token = await self.authenticate()
-                    r = await self.client.post('/open-apis/im/v1/messages',
-                        params={'receive_id_type': 'chat_id'}, json=body,
-                        headers={'Authorization': 'Bearer ' + token})
-                    r.raise_for_status()
-                    data = r.json()
-                    code = data.get('code')
-                    if code == 0:
-                        message_id = (data.get('data') or {}).get('message_id')
-                        if message_id:
-                            message_ids.append(message_id)
-                        break
-                    if code in (99991661, 99991663, 99991668):
-                        self.expiry = 0
-                    elif code not in (11232, 99991400):
-                        raise RuntimeError(f'Feishu send code={code}')
-                    if attempt == 2:
-                        raise RuntimeError(f'Feishu send code={code}')
-                except (httpx.HTTPError, ValueError):
-                    if attempt == 2:
-                        raise RuntimeError('Feishu send network/response failure') from None
-                await asyncio.sleep(1 + attempt)
+            message_id = await self.send_message(chat_id, 'interactive', card)
+            if message_id:
+                message_ids.append(message_id)
         return message_ids
+
+    async def send_message(self, chat_id, message_type, content):
+        body = {'receive_id': chat_id, 'msg_type': message_type, 'uuid': str(uuid.uuid4()),
+                'content': json.dumps(content, ensure_ascii=False)}
+        for attempt in range(3):
+            try:
+                token = await self.authenticate()
+                response = await self.client.post('/open-apis/im/v1/messages',
+                    params={'receive_id_type': 'chat_id'}, json=body,
+                    headers={'Authorization': 'Bearer ' + token})
+                response.raise_for_status()
+                result = response.json()
+                code = result.get('code')
+                if code == 0:
+                    return (result.get('data') or {}).get('message_id')
+                if code in (99991661, 99991663, 99991668):
+                    self.expiry = 0
+                elif code not in (11232, 99991400):
+                    raise RuntimeError(f'Feishu send code={code}')
+                if attempt == 2:
+                    raise RuntimeError(f'Feishu send code={code}')
+            except (httpx.HTTPError, ValueError):
+                if attempt == 2:
+                    raise RuntimeError('Feishu send network/response failure') from None
+            await asyncio.sleep(1 + attempt)
 
 
 def codex_binary(explicit=None):
@@ -607,6 +647,65 @@ class Bridge:
         except Exception as exc:
             LOG.error('reply_failed type=%s detail=%s', type(exc).__name__, clean(str(exc), self.config)[:200])
             return False
+
+    async def reply_result(self, chat_id, text, active, *, notice):
+        display, paths = extract_markdown_attachments(text)
+        generated = tuple(active.get('images', {}).values())
+        if not paths and not generated:
+            await self.reply(chat_id, display, notice=notice)
+            return
+        direct = active.get('chat_type')
+        if direct != 'p2p' and (direct is not None or not self.state.is_direct_chat(chat_id)):
+            await self.reply(chat_id, text, notice=notice)
+            return
+
+        workspace = Path(self.project_for(chat_id))
+        codex_home = Path(self.config.get('codex_home') or os.environ.get('CODEX_HOME') or Path.home() / '.codex')
+        thread_id = active.get('thread_id') or ''
+        generated_dir = None
+        if re.fullmatch(r'[A-Za-z0-9_-]+', thread_id):
+            generated_dir = codex_home.expanduser().resolve() / 'generated_images' / thread_id
+        await self.reply(chat_id, display or 'Codex 本轮工作已结束。', notice=notice)
+        seen = set()
+        failed = False
+        sources = paths[:MAX_ATTACHMENTS] + generated
+        for source in sources:
+            document_type = FILE_TYPES.get(source.suffix.lower()) if isinstance(source, Path) else None
+            if isinstance(source, Path):
+                data = await asyncio.to_thread(read_local_attachment, source, workspace,
+                    limit=MAX_FILE_BYTES if document_type else MAX_IMAGE_BYTES,
+                    generated_dir=None if document_type else generated_dir)
+            else:
+                data = await asyncio.to_thread(generated_image_bytes, source, workspace, generated_dir)
+            media = None if document_type else image_format(data)
+            if not data or (not document_type and (not media or len(data) > MAX_IMAGE_BYTES)):
+                failed = True
+                continue
+            if document_type and document_type[0] == 'pdf' and not data.startswith(b'%PDF-'):
+                failed = True
+                continue
+            identity = (source.name if document_type else None, hashlib.sha256(data).digest())
+            if identity in seen:
+                continue
+            if len(seen) >= MAX_ATTACHMENTS:
+                failed = True
+                break
+            seen.add(identity)
+            try:
+                if document_type:
+                    key = await self.feishu.upload_file(source.name, data, *document_type)
+                    await self.feishu.send_message(chat_id, 'file', {'file_key': key})
+                else:
+                    key = await self.feishu.upload_image(data, *media)
+                    await self.feishu.send_message(chat_id, 'image', {'image_key': key})
+            except FeishuResourcePermissionError:
+                await self.reply(chat_id, '附件发送需要飞书机器人的「获取与上传图片或文件资源」（im:resource）权限。开通后可重新发起任务。')
+                return
+            except Exception as exc:
+                LOG.warning('result_attachment_send_failed type=%s', type(exc).__name__)
+                failed = True
+        if failed or len(paths) > MAX_ATTACHMENTS:
+            await self.reply(chat_id, '部分附件未能在飞书显示。请在 Codex 会话中查看原件。')
 
     def private_question_chat(self):
         with self.state.lock:
@@ -777,7 +876,8 @@ class Bridge:
                     **({'config': overrides} if overrides else {}),
                     serviceName='feishu_codex_bridge', developerInstructions=self.config.get(
                         'developer_instructions', '用户通过飞书与你对话。按工作区 AGENTS.md 执行任务。'
-                        '发送简明进度与结果，不回显密钥。需要额外权限时正常提出审批。')))
+                        '发送简明进度与结果，不回显密钥。交付图片或文件时，在最终回复中用 Markdown 链接引用实际文件。'
+                        '需要额外权限时正常提出审批。')))
                 thread = result['thread']['id']
                 self.state.select_thread(chat_id, thread, str(result.get('cwd') or params['cwd']),
                     result.get('model') or result['thread'].get('model'),
@@ -1354,8 +1454,11 @@ class Bridge:
                 notice = {'completed': '已完成', 'interrupted': '已中止'}.get(status, '执行失败')
                 if status == 'completed' and self.goals.is_managed(thread):
                     notice = self.goals.notification_status(thread)
-                await self.reply(msg['chat_id'], result_text if status == 'completed'
-                                 else title + '\n\n' + result_text, notice=notice)
+                if status == 'completed':
+                    await self.reply_result(msg['chat_id'], active['final'] or (
+                        '' if active.get('images') else result_text), active, notice=notice)
+                else:
+                    await self.reply(msg['chat_id'], title + '\n\n' + result_text, notice=notice)
                 await self.feedback.set(msg['message_id'], status or 'failed')
                 LOG.info('task_finished status=%s', status)
             except Exception as exc:
@@ -1430,6 +1533,9 @@ class Bridge:
             return
         if params.get('threadId') and params['threadId'] != active.get('thread_id'):
             return
+        event_turn = params.get('turnId') or (params.get('turn') or {}).get('id')
+        if active.get('mirrored') and event_turn and active.get('turn_id') != event_turn:
+            return
         if 'id' in event:
             kinds = {'item/commandExecution/requestApproval': 'command',
                      'item/fileChange/requestApproval': 'file',
@@ -1464,15 +1570,21 @@ class Bridge:
             active['turn_id'] = params['turn']['id']
             self.runtime_changed.set()
         elif method == 'turn/completed':
+            turn = params['turn']
+            items = turn.get('items') or []
+            if not active.get('final'):
+                active['final'] = '\n'.join(item.get('text', '') for item in items
+                    if item.get('type') == 'agentMessage' and item.get('phase') in ('final_answer', None))
+            if turn.get('status') == 'completed':
+                for item in items:
+                    remember_generated_image(active, item)
             self.runtime_changed.set()
             if active.get('mirrored'):
                 self.observed.pop(thread_id, None)
                 self.approvals = {code: value for code, value in self.approvals.items()
                     if not (value.get('thread_id') == thread_id and
                             value.get('turn_id') == active.get('turn_id'))}
-                turn = params['turn']
-                final = active['final'] or '\n'.join(item.get('text', '') for item in turn.get('items', [])
-                    if item.get('type') == 'agentMessage' and item.get('phase') in ('final_answer', None))
+                final = active['final']
                 title = {'completed': '共享会话本轮工作已结束', 'interrupted': '共享会话任务已中止'}.get(
                     turn.get('status'), '共享会话任务执行失败')
                 if self.goals.is_managed(thread_id):
@@ -1482,12 +1594,18 @@ class Bridge:
                 notice = {'completed': '已完成', 'interrupted': '已中止'}.get(turn.get('status'), '执行失败')
                 if turn.get('status') == 'completed' and self.goals.is_managed(thread_id):
                     notice = self.goals.notification_status(thread_id)
+                body = final or ('' if active.get('images') else '本轮没有可显示的最终文字。')
+                text = title + '\n\n' + body if body else title
                 for chat in self.chats_for(thread_id):
-                    await self.reply(chat, title + '\n\n' + (final or '本轮没有可显示的最终文字。'), notice=notice)
+                    if turn.get('status') == 'completed':
+                        await self.reply_result(chat, text, active, notice=notice)
+                    else:
+                        await self.reply(chat, text, notice=notice)
             elif not active['done'].done():
                 active['done'].set_result(params['turn'])
         elif method == 'item/completed':
             item = params.get('item', {})
+            remember_generated_image(active, item)
             if item.get('type') == 'agentMessage':
                 text = item.get('text', '')
                 if item.get('phase') in ('final_answer', None):

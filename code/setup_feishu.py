@@ -22,10 +22,11 @@ class SetupError(Exception):
     pass
 
 
-def registration_addons(*, feedback, group, monitor):
+def registration_addons(*, feedback=True, group=True, monitor=True):
     scopes = [
         'im:message.p2p_msg:readonly',
         'im:message:send_as_bot',
+        'im:resource',
         'application:app_slash_command:read',
         'application:app_slash_command:write',
     ]
@@ -107,7 +108,7 @@ async def bot_info(config):
     return {}
 
 
-async def create_bot(path, project_dir, *, group, monitor):
+async def create_bot(path, project_dir, *, group, monitor, configured_permissions=False):
     project = project_dir.expanduser().resolve()
     if not project.is_dir():
         raise SetupError('工作区必须是已存在的目录。')
@@ -127,7 +128,9 @@ async def create_bot(path, project_dir, *, group, monitor):
             if existing.exists() or existing.is_symlink():
                 raise SetupError('该目录已有桥接配置或状态。请补齐已有应用权限，或选择新的运行目录。')
 
-        result = await register(registration_addons(feedback=True, group=group, monitor=monitor))
+        addons = (registration_addons(group=group, monitor=monitor) if configured_permissions
+                  else registration_addons())
+        result = await register(addons)
         app_id, secret = result.get('client_id'), result.get('client_secret')
         if not isinstance(app_id, str) or not APP_ID.fullmatch(app_id):
             raise SetupError('飞书返回的应用 ID 无效。')
@@ -165,20 +168,22 @@ async def create_bot(path, project_dir, *, group, monitor):
     print(shlex.join([sys.executable, str(PROJECT_ROOT / 'code' / 'bridge.py'), '--config', str(path)]))
 
 
-async def update_permissions(path, *, group, monitor):
+async def update_permissions(path, *, group, monitor, configured_permissions=False):
     config = load_config(path)
     app_id = config['app_id']
     if not isinstance(app_id, str) or not APP_ID.fullmatch(app_id):
         raise SetupError('配置中的飞书应用 ID 无效。')
-    monitor_config = path.parent / 'server-monitor.json'
-    if monitor_config.is_file():
-        monitor = monitor or bool(read_private(monitor_config).get('enabled'))
-    addons = registration_addons(feedback=config.get('message_feedback_enabled', True),
-                                 group=group or bool(config.get('bot_open_id')), monitor=monitor)
+    addons = registration_addons()
+    if configured_permissions:
+        monitor_config = path.parent / 'server-monitor.json'
+        if not monitor and monitor_config.is_file():
+            monitor = bool(read_private(monitor_config).get('enabled'))
+        addons = registration_addons(feedback=config.get('message_feedback_enabled', True),
+                                     group=group or bool(config.get('bot_open_id')), monitor=monitor)
     result = await register(addons, app_id=app_id)
     if result.get('client_id') != app_id:
         raise SetupError('飞书返回的应用与目标配置不一致。请核对扫码确认页。')
-    print('飞书已确认权限更新。请按页面提示发布或提交审批，再验证消息与卡片按钮。')
+    print('飞书已收到扫码确认。请按页面提示完成发布或审批，再验证消息、附件和卡片按钮。')
 
 
 def main(argv=None):
@@ -188,16 +193,21 @@ def main(argv=None):
     mode.add_argument('--project-dir', type=Path, help='新建应用，指定 Codex 初始工作区。')
     mode.add_argument('--update-permissions', action='store_true', help='为配置中的已有应用补齐权限。')
     parser.add_argument('--config', type=Path, default=PROJECT_ROOT / 'runtime' / 'config.json')
-    parser.add_argument('--group', action='store_true', help='申请接收群聊 @机器人消息的权限。')
-    parser.add_argument('--server-monitor', action='store_true', help='申请监控卡片置顶权限。')
+    parser.add_argument('--configured-permissions', action='store_true',
+                        help='按已配置功能申请权限。默认一次申请全部桥接权限。')
+    parser.add_argument('--group', action='store_true', help='新建时配置群聊 @机器人，并将群聊权限纳入申请。')
+    parser.add_argument('--server-monitor', action='store_true',
+                        help='按已配置功能申请时，同时申请监控卡片置顶权限。')
     args = parser.parse_args(argv)
     path = args.config.expanduser()
     path = path.parent.resolve() / path.name
+    options = {'group': args.group, 'monitor': args.server_monitor,
+               'configured_permissions': args.configured_permissions}
     try:
         if args.update_permissions:
-            asyncio.run(update_permissions(path, group=args.group, monitor=args.server_monitor))
+            asyncio.run(update_permissions(path, **options))
         else:
-            asyncio.run(create_bot(path, args.project_dir, group=args.group, monitor=args.server_monitor))
+            asyncio.run(create_bot(path, args.project_dir, **options))
     except SetupError as exc:
         print(exc, file=sys.stderr)
         return 1
