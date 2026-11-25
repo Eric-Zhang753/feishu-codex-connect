@@ -1619,7 +1619,7 @@ class Bridge:
                     if not (value.get('thread_id') == thread_id and
                             value.get('turn_id') == active.get('turn_id'))}
                 final = active['final']
-                title = {'completed': '共享会话本轮工作已结束', 'interrupted': '共享会话任务已中止'}.get(
+                title = {'completed': '已完成', 'interrupted': '共享会话任务已中止'}.get(
                     turn.get('status'), '共享会话任务执行失败')
                 if self.goals.is_managed(thread_id):
                     title = self.goals.progress_title(thread_id) if turn.get('status') == 'completed' else title
